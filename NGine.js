@@ -54,13 +54,12 @@ Element.prototype.html = function( in_html_content) {
     return this.innerHTML;
 }
 Element.prototype.show = function( ) {
-    this.style.display = "block";
-    /*    if (this.style.display == "none") {
+    if (this.style.display == "none" || this.style.display == "") {
         this.style.display = this._default_display || "block";
-    } */
+    }
     return this;
 }
-  Element.prototype.hide = function( ) {
+Element.prototype.hide = function( ) {
     if (this.style.display != "none") {
       this.toggle();
     } 
@@ -1119,8 +1118,8 @@ Element.prototype.css = function( style, val) {
     if (in_ctx.$instance_refs[expr] !== undefined) {
       this.dbg("map.ref  " + in_exp +"/"+ expr+" has already been declared in  this rendering session" );
     }
-    in_ctx.$refs[expr] = $j(in_el);
-    in_ctx.$instance_refs[expr] = $j(in_el);
+    in_ctx.$refs[expr] = in_el;
+    in_ctx.$instance_refs[expr] = in_el;
     return true;
   }
   
@@ -1136,8 +1135,8 @@ Element.prototype.css = function( style, val) {
       in_ctx.$refs[expr] = [];
       in_ctx.$instance_refs[expr] = [];
     }
-    in_ctx.$refs[expr].push( $j(in_el) );
-    in_ctx.$instance_refs[expr].push( $j(in_el) );
+    in_ctx.$refs[expr].push( in_el );
+    in_ctx.$instance_refs[expr].push( in_el );
     return true;
   }
   //----------------------------------------------------
@@ -1764,44 +1763,8 @@ Element.prototype.css = function( style, val) {
   }
 
 
-//----------------------------------------------------
-JNgine.fn_map.infobox = function (in_el, exp, ctx, in_lctx) {
-    /*
-    Transform "<infobox>This is my Helper Text</infobox>"
-    to 
-      <div class="tooltip">
-      <img src="img/info.png" class="iconh15">
-      <span class="tooltiptext">This is my Helper Text</span>
-      </div>
-    */
-    var main = document.createElement("div");
-    main.classList.add("tooltip");
-    var img = document.createElement("img");
-    img.setAttribute("src" , "img/info.png");
-    img.classList.add("iconH20");
-    main.appendChild(img);
-    var span = document.createElement("span");
-    span.classList.add("tooltiptext");
-    span.innerHTML = in_el.innerHTML;
-    main.appendChild(span);
-    in_el.innerHTML = "";
-    in_el.appendChild(main);
-    // specific here, return modified element
-  }
-  
-  //----------------------------------------------------
-  JNgine.fn_map["rendereditable"] = function (in_el, in_exp, in_ctx, in_lctx) {
-    // get edit_func 
-   let cb_func = JNgine.processExpr(in_exp, in_ctx, in_el, in_lctx);
-   if (typeof cb_func !== "function") {
-      this.warn("Not a Function")
-      JNgine.logErr(in_el, " WAR(rendereditable) : Not a function " + in_exp +".\n Expr: " + in_exp, in_ctx)
-      return true;
-    }
-    D4_EditableField( in_ctx.$app, $j(in_el), cb_func , [] );
-    return true;
-  }
-  
+/* Possible extention with jQuery
+
   
 //----------------------------------------------------
 JNgine.fn_map["slidetoggle"] = function (in_el, in_exp, in_ctx, in_lctx) {
@@ -1836,3 +1799,5 @@ JNgine.fn_map["slidetoggle"] = function (in_el, in_exp, in_ctx, in_lctx) {
     });
     return true;
   }
+
+*/
