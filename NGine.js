@@ -967,16 +967,28 @@ Element.prototype.css = function( style, val) {
     // JBIND handles Two-way DOM/VAR bindings.
     // Limited capacity... but enough for most situations.
     this.JBind = function (opt) {
-      if (opt.ctx.$bindmaps[opt.fqdn] === undefined ) {
-        opt.ctx.$bindmaps[opt.fqdn] = {
-          value : opt.obj[opt.prop],
-          exp : opt.fqdn ,
-          targets : []
-        };
-      }
-      var bindmap = opt.ctx.$bindmaps[opt.fqdn];
-  
-      bindmap.targets.push({bind_scope : opt.bind_scope, el : opt.el});
+        if ( ! opt.obj.__D4_bindmaps) {
+          // Create a hidden property that will host binding refereneces.
+          Object.defineProperty(opt.obj, "__D4_bindmaps", {enumerable : false, writable : true, value:{}})
+        }
+        if (! opt.obj.__D4_bindmaps[opt.prop]) {
+          opt.obj.__D4_bindmaps[opt.prop] = {
+            value : opt.obj[opt.prop],
+            targets : []
+          };
+        }
+        opt.obj.__D4_bindmaps[opt.prop].targets.push({bind_scope : opt.bind_scope, el : opt.el})
+        var bindmap = opt.obj.__D4_bindmaps[opt.prop];
+
+
+        // var bindmap =  {
+        //     value : opt.obj[opt.prop],
+        //     exp : opt.fqdn ,
+        //     targets : []
+        // };
+        // bindmap.targets.push({bind_scope : opt.bind_scope, el : opt.el});
+
+
       // the bounded object has to be restructured so we can catch changes.
       Object.defineProperty( opt.obj, opt.prop, {
         get : function() { return bindmap.value; } , 
