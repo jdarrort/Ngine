@@ -50,7 +50,7 @@ Element.prototype.clear = function( ) {
     this.innerHTML = ""; return this;
 }
 Element.prototype.html = function( in_html_content) { 
-    if (in_html_content) {this.innerHTML = in_html_content;}  
+    if (typeof in_html_content === "string" ) {this.innerHTML = in_html_content;}  
     return this.innerHTML;
 }
 Element.prototype.show = function( ) {
