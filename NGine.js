@@ -1004,9 +1004,13 @@ Element.prototype.css = function( style, val) {
             try{
               // Bind on directive
               if ( map.bind_scope[0] == ':' ) {
-                JNgine.fn( map.bind_scope.slice(1), map.el.origDef[map.bind_scope], map.el, opt.ctx, { } );
+                  // Can not work.... context is gone...
+                  // should rename expression with $, and apply it with current value
+                   // like ==>  JNgine.fn( map.bind_scope.slice(1), '$', map.el, {$data: [opt.obj[opt.prop]]}, { } );
+                  // I keep it uncommented but...
+                    JNgine.fn( map.bind_scope.slice(1), map.el.origDef[map.bind_scope], map.el, opt.ctx, { } );
               } else if (map.bind_scope[0] == '$') {
-                map.el.setAttribute( map.bind_scope.slice(1), JNgine.processExpr(map.el.origDef[map.bind_scope], opt.ctx, map.el,  { } ) );
+                map.el.setAttribute( map.bind_scope.slice(1), opt.obj[opt.prop] );
               } else if ( map.bind_scope == 'innerText' ) {
                 // bind on text
                 let origDef = map.el.origDef;
