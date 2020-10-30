@@ -779,7 +779,8 @@ Element.prototype.css = function( style, val) {
       if (isVarRE3.test(this.maskInFunctionStatements(exp))) {
         let val;
         let ref_obj;
-  
+        let force_$data =false;
+
         // Extract any statement within [ ] and replace with ".processedVaue"
         var bracketRE = /(\[(?:\[??[^[(]*?\]))/mg;
         exp = exp.replace( bracketRE, k => {
@@ -790,10 +791,14 @@ Element.prototype.css = function( style, val) {
         });
         
         // return value from explicited context data
+//         if (exp.match(/^\$\./)) {
+//           return this.getValueFromDataContext( exp.slice(2), in_ctx );
+//         }
         if (exp.match(/^\$\./)) {
-          return this.getValueFromDataContext( exp.slice(2), in_ctx );
+          force_$data = true;
+          exp = exp.slice(2);
         }
-
+          
         // when function (example )
         let fn_statements = []
         let i, o, var_membs = this.maskInFunctionStatements(exp, fn_statements).split(".");
@@ -805,7 +810,7 @@ Element.prototype.css = function( style, val) {
               ref_obj = val = in_ctx.$app;
               continue;
             }
-            if (first_member == "CST"  && window.CST) {  // Grab a CONSTANT Value
+            if ( !force_$data && first_member == "CST"  && window.CST) {  // Grab a CONSTANT Value
               ref_obj = val = window.CST; 
               in_lctx.bindScope = C_NOBIND; // Not bindable
               continue;
@@ -814,10 +819,10 @@ Element.prototype.css = function( style, val) {
             // Perform some test to check if results can be found from $data (which has most priority).
             let in$data = in_ctx.$data.find( cd => ( Object.keys(cd).indexOf(first_member) >= 0) );
   
-            if (in_ctx.$render[first_member] !== undefined) { val = in_ctx.$render; }  // local rendering context (loop indexes, ...)
+            if ( !force_$data && in_ctx.$render[first_member] !== undefined) { val = in_ctx.$render; }  // local rendering context (loop indexes, ...)
             //else if (in_ctx.$data[o] !== undefined) { val = in_ctx.$data; } 
             else if ( in$data !== undefined) { val = in$data; }
-            else if (in_ctx.$app[first_member] !== undefined) { val = in_ctx.$app; }
+            else if ( !force_$data && in_ctx.$app[first_member] !== undefined) { val = in_ctx.$app; }
             else {
               this.logErr(in_el, "  ERR : variable " + o + " not available in any context.\n Expr: " + exp, in_ctx);
               throw new Error();
