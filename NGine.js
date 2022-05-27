@@ -5,14 +5,28 @@
     Description :  Rendering processor -   New Engine.
     Inspired by other frameworks, angular/vue. Only for the rendering abilities.
     Limited scope of functionalities...
-     * Warning, source data provided may be altered by custom functions  (no data copies)
+     * Warning, source data provided may be altered by custom functions (no data copies)
      * Expression will look for data in this order
       1/ in current rendering context (variables created at render time)
-      2/ in specific context data provided in StartRender
+      2/ in specific context_data provided in StartRender
       3/ in core app provided. 
      * Limited capacity for bindings.
+
+    Possibility to "stack" context datas, allowing to render a sub template with a dedicated set
+    of data .
+
 */
 
+Date.prototype._toString = Date.prototype.toString ;
+Date.prototype.toString = Date.prototype.toLocaleDateString;
+Date.prototype.YYMMDD = function() { return this.toString().slice(0,10)};
+Number.prototype.toEuros = function() {
+  return this.toLocaleString('fr-FR', {minimumFractionDigits : 2, maximumFractionDigits : 2}) + " €"
+}
+String.prototype.toEuros = function() {
+  if (Number.isNaN(parseFloat(this))){ return this.toString()};
+  return parseFloat(this).toLocaleString('fr-FR', {minimumFractionDigits : 2, maximumFractionDigits : 2}) + " €"
+}
 
 /*********************************************************************************
     DOM manipulation extension
@@ -46,8 +60,8 @@ Element.prototype.html = function( in_html_content) {
   return this.innerHTML;
 }
 Element.prototype.show = function( ) {
-  if (this.style.display == "none" || this.style.display == "") {
-      this.style.display = this._default_display || "block";
+  if (this.style.display == "none") {
+      this.style.display = this._default_display || "";
   }
   return this;
 }
@@ -59,7 +73,7 @@ Element.prototype.hide = function( ) {
 }
 Element.prototype.toggle = function( ) {
   if (this.style.display == "none") {
-      this.style.display = this._default_display || "block";
+      this.style.display = this._default_display || "";
   } else {
       this._default_display = this.style.display ;
       this.style.display = "none";
@@ -75,7 +89,10 @@ Element.prototype.css = function( style, val) {
   this.style[style] = val;
   return this;
 }
-Element.prototype.prop = function( in_prop, val) {   this.setAttribute(in_prop, val);  return this;}
+Element.prototype.prop = function( in_prop, val) {   
+  if (! val && typeof in_prop =="string")  { return this.getAttribute(in_prop)};
+  this.setAttribute(in_prop, val);  return this;
+}
 Element.prototype.addClass = function( in_class) {   this.classList.add(in_class);  return this;}
 Element.prototype.removeClass = function( in_class) {   this.classList.remove(in_class);  return this;}
 Element.prototype.toggleClass = function( in_class) {   this.classList.toggle(in_class);  return this;}
@@ -92,7 +109,6 @@ Element.prototype.clickable = function( ) {   this.style.cursor="pointer";  retu
     JNgine
 **********************************************************************************/
 
-// Does not work
 // !!! Achtung with <z> : This does not work :  When cloned, "z" is attached outside of the tr
 /*
         <tr :pause>
@@ -106,28 +122,25 @@ Element.prototype.clickable = function( ) {   this.style.cursor="pointer";  retu
 const C_REFRESH= "_bind_refresh__";
 const  C_NOBIND = "_donotbind_"
 var JNgine = new (function () {
-  var _this =this;
+  var _this = this;
   'use strict';
   // Determine structure
   const isFuncRE = /^(\w+)\((.*)\)$/;
   const isVarRE = /^\s*(\${0,1}[a-zA-Z0-9_.]+)\s*$/; // return a var 
-
+/*
   // accept toto.tata, toto, $.tata , #.tata, my_var1[my_var2].prop1
   const isVarRE3OLD = /^\s*(((\$\.){0,1}|(\#\.){0,1})[a-zA-Z0-9_.\[\]\(\)]+)\s*$/; // var that may refrence an object // like    my_var1[my_var2].prop1, myobj.toUpperCase()
   const isVarRE3_gOLD = /(((\$\.){0,1}|(\#\.){0,1})[a-zA-Z0-9_.\[\]\(\)]+)/g; 
   const isVarRE3 = /^\s*(((\$\.){0,1}|(#\.){0,1}|(@\.){0,1})[a-zA-Z0-9_.\[\]\(\)]+)\s*$/; // var that may refrence an object // like    my_var1[my_var2].prop1, myobj.toUpperCase()
   const isVarRE3_g = /(((\$\.){0,1}|(\#\.){0,1}|(@\.){0,1})[a-zA-Z0-9_.\[\]\(\)]+)/g; 
-
+*/
 
   // RegExp used in vue to identify quoted strings in an expression
   const VUEstripStringRE = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*\$\{|\}(?:[^`\\]|\\.)*`|`(?:[^`\\]|\\.)*`/g;
-
+/*
   const isStringRE = /^['|"](.*)["|']$/;  // ex "'toto'" ou "'  43434 " 
   const isNumRE = /^\s*(\d+)\s*$/;
- 
-  const isComplexExpRE = /[^\w.$]/; // matchs anything that is not a one word  or a var exp (like a.b) ... not ready....
-  const isObjectRE = /^\{(.*?)\}$/;
-
+ */
   const checkEventExprRE = /^(\w+)\s+with\s+(.+)\s*$/; //  "myfct with var1,'txt2'"
   const checkEventExprRE_NEW = /^\s*(.+)\s+with\s+(.+)\s*$/; //  "myfct with var1,'txt2'"
 
@@ -138,11 +151,13 @@ var JNgine = new (function () {
   this.warn = function (txt) { console.warn("[Ngn] " + txt); }
   this.err  = function (txt) { console.error("[Ngn] " + txt); }
 
+  isDefined = function(o) {return o !== undefined && o != null; }
+  isFn = function(o) {return typeof o == "function"}
   this.watched_expr=[];
   // Enrich App object with JNgine attributes
   this.extend = function(in_app){
     in_app.$refs={};
-    in_app.$focus;
+    in_app.$focus = null;
     in_app.$bindmaps={};
     in_app.$tabs={};
     in_app.$forms=[];
@@ -174,7 +189,7 @@ var JNgine = new (function () {
     var el_tpl = document.getElementById( in_tpl_id );
     if ( ! el_tpl ) {
         this.warn("Template not found : " + in_tpl_id );
-        return;
+        throw new Error("Template not found : " + in_tpl_id );
     }
     var tpl_clone = el_tpl.cloneNode( true );
     // specific handling of "template" objects, for which ChildNodes are under "content"
@@ -323,10 +338,10 @@ var JNgine = new (function () {
         if (this.watched_expr.indexOf(attr_val) >=0) {
           this.log("WATCH ME");
         }
-        // Must bind this attribute to a variable ?
+        // Must bind this attribute to a variable ? 
         if (attr_name[0] == "@"){
           attr_name = attr_name.slice(1);
-          local_ctx.bindScope =  attr_name; //  $aaa ==> aaa
+          local_ctx.bindScope =  attr_name; //  
         }
 
         if (attr_name[0] == "$"){
@@ -345,16 +360,22 @@ var JNgine = new (function () {
             $href="getHref()"
           try {
             attr_val = this.processExpr(attr_val, in_ctx, in_el, local_ctx);
-            if (attr_val === null || attr_val === undefined) { 
-              attr_val = "" ;
-            }
+            attr_val = isDefined(attr_val) ?  attr_val : '';
           } catch (e) {attr_val = ""}
         }
         
         // Specific processing for SELECT and attribute "value"
         //  <option>  being defined afterwards, must position value in postprocessing.
-        if (in_el.nodeName =="SELECT" && attr_name == "value"){
-          in_el.d4_value = attr_val;
+        if (attr_name == "value") {
+          if (in_el.nodeName =="SELECT"){
+            in_el.d4_value = attr_val;
+          } else if (in_el.nodeName =="TEXTAREA"){
+            in_el.text(attr_val);
+          } else if (in_el.nodeName =="INPUT" && in_el.type =="radio" ){
+            in_el.getAttribute("value") == attr_val ? in_el.checked = true : null;
+          } else {
+            in_el.setAttribute(attr_name, attr_val);
+          }
         } else {
           in_el.setAttribute(attr_name, attr_val);
         }
@@ -376,7 +397,7 @@ var JNgine = new (function () {
         // Must bind this attribute to a variable ?
         if (attr_name[0] == "@"){
           attr_name = attr_name.slice(1);
-          local_ctx.bindScope =  ":" + attr_name; //  $aaa ==> aaa
+          local_ctx.bindScope =  ":" + attr_name; // From :@aaa ==> :aaa
         } 
         // Apply Directive
         if (!this.fn(attr_name, attr_val, in_el, in_ctx, local_ctx)) {
@@ -420,16 +441,14 @@ var JNgine = new (function () {
           new_text = current_text.replace(/{{(.+?)}}/g, function (x, exp) {
             let subst="";
             try { subst = JNgine.processExpr(exp, in_ctx, node ); } catch(e) {}
-            if (subst === null) subst = '';
-            return subst
+            return isDefined(subst) ? subst : '';
           });
           // Substitution with one way bindings.
           new_text = new_text.replace(/{@{(.+?)}}/g, function (x, exp) {
             node.origDef = node.origDef  || new_text;
             let subst="";
             try { subst = JNgine.processExpr(exp, in_ctx, node, {bindScope : "innerText"} ); } catch(e) {}
-            if (subst === null) subst = '';
-            return subst
+            return isDefined(subst) ? subst : '';
           });
           if (node.tagName == "TEXTAREA") {
             node.value = new_text;
@@ -524,13 +543,16 @@ var JNgine = new (function () {
       if (local_ctx["form"]){
         in_ctx.$forms_stack.shift();
       }
-
+      if (local_ctx["skipchilds"]){
+        return;
+      }
 
       // Specific processing for "<Z>" elements.
       // Must be done at the very end.
       if (in_el.tagName == "Z" || in_el.tagName == "Z-SILENT") {
           // move each child Node just before the Z tag.
-          while (in_el.childNodes.length){
+          // but possibly, z has no more parent element (when used with  <z :if="1"> for example)
+          while (in_el.childNodes.length && in_el.parentNode){
             in_el.parentNode.insertBefore(in_el.childNodes[0], in_el);
           }
         in_el.remove(); // Remove "<z>" tags, childNodes would have been moved just before
@@ -539,9 +561,37 @@ var JNgine = new (function () {
     } catch (e){
       this.warn ("went wrong here....");
     }
-
     // process finalized.
   } // handleNode
+
+  //-----------------------------------
+  // Extract Enclosed string
+  this.getEnclosed = function (in_txt) {
+    // recherche de ")" fermante
+    let opening = in_txt[0];
+    let closure = in_txt[0];
+    let expected = 0;
+    let idx = 0;
+    switch (opening){
+        case '(' : closure = ')'; break;
+        case '[' : closure = ']'; break;
+        case "'" : closure = "'"; break;
+        case '"' : closure = '"'; break;
+    }
+    for (let c of in_txt) {
+        if (c == opening) { expected ++;}
+        if (c == closure) { expected --;}
+        if (expected == 0) {
+            return {
+                size : idx + 1,
+                enclosed : in_txt.slice(1,idx),
+                type : opening
+            }
+        }
+        idx++
+    }
+    throw new Error("Invalid Expression - No closing found  " + closure)
+  }
 
 
   //-----------------------------------------
@@ -583,12 +633,12 @@ var JNgine = new (function () {
         return;
       }
     }
-    if (typeof cb_fn_name !== "function") {
+    if ( ! isFn(cb_fn_name)) {
       this.logErr(in_el, " ERR : callback " + cb_fn_name + " is not a definied function in current  ctx.$app .\n Expr: " + in_exp, in_ctx);
       return;
     }
 
-    if (["click", "contextmenu", "dblclick"].indexOf(in_event) >=0 ) {
+    if (["click", "contextmenu", "dblclick"].includes(in_event) ) {
       in_el.style.cursor = "pointer";
     }
 
@@ -601,442 +651,183 @@ var JNgine = new (function () {
       cb_fn_name.apply( in_ctx.$app, call_params);
     });
   }
-  //-----------------------------------------
-  // Process event declarations.
-  this.processEventOLD = function (in_event, in_exp, in_el, in_ctx, in_lctx) {
-    // example 
-    //      : @click=manageToto   ==> Will call manageToto with contexte data
-    //      : @click=manageToto with i,'ok'  ==> Will call manageToto with contexte data
-    // The callback will be called with 2 args : 
-    //    - the first arg will be an array of values that are interpreted after the "... with ..."
-    //    - The Second arg will be the event that has been triggered.
-
-    let cb_fn_name;
-    let cb_params = [];
-    let stop_propagation = true ;
-
-    if (in_event[in_event.length-1] == '@'){
-      stop_propagation = false;
-      in_event = in_event.substring(0, in_event.length - 1 );
-      this.dbg("Managing a custom event and keep propagation");
-    }
-
-    // Which callback ?
-    if (isVarRE.test(in_exp)) {//      : @click=manageToto   ==> Will call manageToto with contexte data
-      cb_fn_name = in_exp;
-    } else {
-      let ev_exp = in_exp.match(checkEventExprRE);
-      if (ev_exp) { //      : @click=manageToto with i,'ok'  ==> Will call manageToto with contexte data
-        cb_fn_name = ev_exp[1];
-
-        // parse vars.
-        ev_exp[2].split(",").forEach(function (p, i) {
-          // interpret parameter at rendering time.
-          cb_params.push(this.processExpr(p, in_ctx, in_el, in_lctx));
-        }, this);
-      } else {
-        this.logErr(in_el, " ERR : Could not identify fn ctx.$app (2) .\n Expr: " + in_exp, in_ctx);
-        return;
-      }
-    }
-    // check existence : 
-    if (typeof in_ctx.$app[cb_fn_name] !== "function") {
-      this.logErr(in_el, " ERR : callback " + cb_fn_name + " is not a definied function in current  ctx.$app .\n Expr: " + in_exp, in_ctx);
-      return;
-    }
-
-    if (["click", "contextmenu", "dblclick"].indexOf(in_event) >=0 ) {
-      in_el.style.cursor = "pointer";
-    }
-
-    in_el.addEventListener(in_event, function (e) {
-      if (stop_propagation) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      let call_params = cb_params.concat([e]);
-      in_ctx.$app[cb_fn_name].apply( in_ctx.$app, call_params);
-    });
-  }
-  //-----------------------------------------
-  // Search among ctx $data for matching attribute (respecting context order)
-  this.getValueFromDataContext = function (in_exp, in_ctx) {
-    let membs = in_exp.split(".");
-    // Try to find first member of expression in one of the data context
-    let first_member = membs.shift();
-    // let selected_ctx_data = in_ctx.$data.find( cd => ( Object.keys(cd).indexOf(first_member) >= 0) );
-    // Include non iterable attribuutes, like .length
-    let selected_ctx_data = in_ctx.$data.find( cd => ( Object.keys(cd).indexOf(first_member) >= 0 || (typeof cd ==="object" && typeof cd[first_member] !== "undefined")) );
-    if (!selected_ctx_data) {
-      return undefined; 
-    }
-    selected_ctx_data = selected_ctx_data[first_member];
-    // Then browse the selected tree object 
-    let i = 0;
-    for (i = 0; i < membs.length; i++){
-      // Special handling for functions;
-      let func_tmp = membs[i].match(isFuncRE);
-      if (func_tmp) {
-        let fct_name = func_tmp[1];      
-        return selected_ctx_data[fct_name].call(selected_ctx_data);
-      } else {
-        selected_ctx_data = selected_ctx_data[membs[i]];
-      }      
-      if (typeof selected_ctx_data ==="undefined") return undefined;
-    }
-    return selected_ctx_data;
-  }
-  // //-----------------------------------------
-  // // Search among ctx $data for matching attribute (respecting context order)
-  // this.getValidDataContext = function (in_member, in_ctx) {
-  //   return in_ctx.$data.find( cd => ( Object.keys(cd).indexOf(in_member) >= 0) );
-  // }
-
-  //-----------------------------------------
-  // Preprocessor function to process sub statements of type function, and replace it 
-  // Useless....
-  this.extractInFunction = function( in_exp, in_ctx, in_el) {
-    let statements = [];
-    let openings = [];
-    let target_expr = in_exp;
-    for (i in in_exp) { 
-        switch(in_exp[i]) {
-            case '(' :
-                //console.log(`Found opening at : ${i}, depth : ${openings.length}`)
-                openings.unshift(parseInt(i));
-                break;
-            case ')' :
-                //console.log(`Found closing at : ${i}, depth : ${openings.length -1}`)
-                if (!openings.length) { 
-                  console.warn("closing parenthesis, without opening at " + i);
-                  throw new Error();
-                }
-                openings[0].end_at = i;
-                let statement = in_exp.slice(openings[0] + 1, i );
-                if (openings.length == 1  && statement.trim() != "") {
-                  // Process_expr
-                  try {
-                    let replacement = this.processExpr(statement, in_ctx, in_el);
-                    replacement = isNaN(Number(replacement)) ?  `'${replacement}'` : replacement;
-                    // this.dbg(`SubFnExpr : Replacing ${statement}  => '${replacement}'`)
-                    target_expr = target_expr.replace(new RegExp(statement), replacement);
-                    // this.dbg(`SubFnExpr : Statement will be  ${target_expr}`)
-                  } catch (e) {
-                    this.warn(`SubFnExpr ${statement} could not be interpreted`)
-                    throw e;
-                  }
-                }
-                openings.shift();
-                break;
-        }
-    }
-    return target_expr;
-  }
-  //-----------------------------------------
-  // Preprocessor function to process sub statements of type function, and replace it 
-  this.maskInFunctionStatements = function( in_exp, fn_statements=[]) {
-      let statements = [];
-      let openings = [];
-      let processed_exp = in_exp;
-      for (i in in_exp) { 
-          switch(in_exp[i]) {
-              case '(' :
-                  //console.log(`Found opening at : ${i}, depth : ${openings.length}`)
-                  openings.unshift(parseInt(i));
-                  break;
-              case ')' :
-                  //console.log(`Found closing at : ${i}, depth : ${openings.length -1}`)
-                  if (!openings.length) { 
-                    console.warn("closing parenthesis, without opening at " + i);
-                    throw new Error();
-                  }
-                  openings[0].end_at = i;
-                  let statement = in_exp.slice(openings[0] + 1, i );
-                  if (openings.length == 1  && statement.trim() != "") {
-                      processed_exp = processed_exp.replace(statement, "");
-                  }
-                  fn_statements.push(statement);
-                  openings.shift();
-                  break;
-          }
-      }
-      return processed_exp;
-    }
   
-  //-----------------------------------------
-  // Preprocessor function to process sub statements of type function
-  
-  this.extractInBrackets = function( in_exp, in_ctx, in_el) {
-    let openings = [];
-    let target_expr = in_exp;
-    for (i in in_exp) { 
-        switch(in_exp[i]) {
-            case '[' :
-                //console.log(`Found opening at : ${i}, depth : ${openings.length}`)
-                openings.unshift(parseInt(i));
-                break;
-            case ']' :
-                //console.log(`Found closing at : ${i}, depth : ${openings.length -1}`)
-                if (!openings.length) { 
-                  this.warn(`closing parenthesis, without opening at ${i}, exp : ${in_exp}`);
-                  throw new Error();
-                  continue;
-                }
-                openings[0].end_at = i;
-                let statement = in_exp.slice(openings[0] + 1, i );
-                if (openings.length == 1 ) {
-                  // Process_expr
-                  try {
-                    let replacement = this.processExpr(statement, in_ctx, in_el);
-                    if (  ["number","string"].indexOf(typeof  replacement) == -1) { 
-                        this.warn(` In bracket statement ${statement} returns an invalid object type ${typeof replacement} `);
-                        throw new Error("waza");
-                    }
-                    // this.dbg(`SubBkExpr : Replacing ${statement}  => ${replacement}`)
-                    target_expr = target_expr.replace("["+statement+"]", "."+replacement);
-                    // this.dbg(`SubBkExpr : Statement will be  ${target_expr}`)
 
-                  } catch (e) {
-                    this.warn(`SubBkExpr ${statement} could not be interpreted`)
-                    throw e;
-                  }
-                }
-                openings.shift();
-                break;
-        }
-    }
-    return target_expr;
-  }  
   //-----------------------------------------
   // $ ==> Refer to context data passed to Ngine
   // # ==> Refer to the caller data from the  calling object ()
   // @ ==> Refer to a data built at rendering time within Ngine
+  // 
+  // Will not handle exp like    a.b[c+1]
+  // Can handle exp like   'c + 1' ,  " 'MyName ' + getName() "
   this.processExpr = function (in_exp, in_ctx, in_el, in_lctx = { bindScope : C_NOBIND }) {
-    let exp = in_exp.trim();
-    var _this = this;
-    let res;
-    //  if (typeof in_lctx == "undefined") in_lctx = { bindScope : C_NOBIND };
-    // determine expression type.
-
-    if (exp == "$") {
-      if (in_ctx.$data.length > 1) {
-        this.warn("Expr $ while cumulated $data contexts found... Returning current context")
+      exp = in_exp.trim();
+      if (exp == "$") {return in_ctx.$data[0];}
+      if (exp =="api_path + '3'"){
+        console.log("WatchPoint");
       }
-      return in_ctx.$data[0]; // Returns current data context ... maybe not perfect
-    }
-    
-    // special chars 
-    //@xxx designates to an instance reference.
-/*    if (exp[0] == "@") {
-      let cur_exp = exp.slice(1);
-      if (in_ctx.$instance_refs[cur_exp]){
-        return in_ctx.$instance_refs[cur_exp];
-      } else {
-        this.logErr(in_el, "  ERR : unable to find EL reference.\n Expr: " + exp, in_ctx);
-        // return "";
-        throw new Error();
-      }
-    }*/
 
-    if (! isNaN(Number(exp))) { // is number ex : 434
-      return exp;
-    }
-    
-    // constant string value
-    if (isStringRE.test(exp)) { // is a string ex : "'Toto'"
-      // ensure first that there are not several 'totot' + ' ggoi'
-      if ((exp.split('"').length + exp.split("'").length) == 4) {
-        return exp.match(isStringRE)[1];
-      }
-    }
-    // Process subStatements
-    exp = this.extractInBrackets(exp, in_ctx, in_el);    
-  //   exp = this.extractInFunction(exp, in_ctx, in_el);
-
-
-    // May conflict with complex types...
-    // Not tested... not sure that works...
-    if (isObjectRE.test(exp)) {
-      //console.log("!!!!return object!!! " + exp);
-      try {
-        let f = new Function( "return " + exp ); // check syntax
-        res = f.call( in_ctx.$app );
-        return res;
-      } catch (e){
-        this.logErr(in_el, "  ERR : unable to interpret  as an object.\n Expr: " + exp, in_ctx);
-        throw new Error();
-        return "";
-      }
-    }
-
-
-
-    // if simple expression related to a var
-    /* exemple :  
-      my_var
-      myvar.prop1
-      myvar[b]      (b= 'prop1')
-      myvar['prop1']
-      myvar.prop1.toUpperCase()
-    */
-   // Test it without considering what are within a function statement
-    if (isVarRE3.test(this.maskInFunctionStatements(exp))) {
-      let val;
-      let ref_obj;
-      let force_$data =false;
-
-      // Extract any statement within [ ] and replace with ".processedVaue"
-      var bracketRE = /(\[(?:\[??[^[(]*?\]))/mg;
-      exp = exp.replace( bracketRE, k => {
-        this.log("Going for replacement for " + k);
-        // remove  '['  ']' 
-        let x = k.replace(/[\[\]]+/g, () => {return "";})
-        return "." + this.processExpr(x, in_ctx, in_el, {}); // do not pass localContext, no binding to do on those sub processExpr
-      });
+      // A Number ? 
+      if (/^[0-9]$/.test(exp)) { return exp; }
       
-      // return value from explicited context data
-//         if (exp.match(/^\$\./)) {
-//           return this.getValueFromDataContext( exp.slice(2), in_ctx );
-//         }
-      if (exp.match(/^\$\./)) {
-        force_$data = true;
-        exp = exp.slice(2);
+      // An encapsulated string ex :  'xxx'  ? 
+      const isStringRE = /^['|"](.*)["|']$/
+      if(isStringRE.test(exp)) { // ex "'toto'" ou "'  43434 " 
+          if ((exp.split('"').length + exp.split("'").length) == 4) {
+              return exp.match(isStringRE)[1];
+          }        
       }
-        
-      // when function (example )
-      let fn_statements = []
-      let i, o, var_membs = this.maskInFunctionStatements(exp, fn_statements).split(".");
-      for (i in var_membs) {
-        o = var_membs[i];
-        if (i == 0) {
-          let first_member = o.replace(/\(.*\)/, "");
-          if (first_member == "@"){ // Refer to Reference (of current rendering)
-            ref_obj = val = in_ctx.$instance_refs;
-            continue;
-          }
-          if (first_member == "#"){ // Refer to APP Context
-            ref_obj = val = in_ctx.$app;
-            continue;
-          }
-          if ( !force_$data && first_member == "CST"  && window.CST) {  // Grab a CONSTANT Value
-            ref_obj = val = window.CST; 
-            in_lctx.bindScope = C_NOBIND; // Not bindable
-            continue;
-          }
 
-          // Perform some test to check if results can be found from $data (which has most priority).
-          // let in$data = in_ctx.$data.find( cd => ( Object.keys(cd).indexOf(first_member) >= 0) );
-          let in$data = in_ctx.$data.find( cd => ( typeof cd == "object" && cd[first_member] !== undefined) );
-
-          if ( !force_$data && in_ctx.$render[first_member] !== undefined) { val = in_ctx.$render; }  // local rendering context (loop indexes, ...)
-          //else if (in_ctx.$data[o] !== undefined) { val = in_ctx.$data; } 
-          else if ( in$data !== undefined) { val = in$data; }
-          else if ( !force_$data && in_ctx.$app[first_member] !== undefined) { val = in_ctx.$app; }
-          else {
-            this.logErr(in_el, "  ERR : variable " + o + " not available in any context.\n Expr: " + exp, in_ctx);
-            throw new Error();
-            return "";
+      const CpxRe = /[+\-*!=<>]/;
+      if (CpxRe.test(exp)) {
+          // throw new Error("Not Handled Yet");
+          // Will have to identify what is to be interpreted.
+          let SubCpxRE=/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/mg;
+          if (/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)=([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/.test(exp)) {
+            this.logErr(in_el, "  ERR : An affectation in a complex exp  has been found.\n Expr: " + exp, in_ctx);
+            throw new Error("Forbidden to assign  in statement '='");
           }
-        }
-
-        // Special handling for functions;
-        let func_tmp = o.match(isFuncRE);
-        if (func_tmp) {
-          let fct_name = func_tmp[1];      
-          if (typeof val[fct_name] ==="function") {
-            // need to process params within that function
-            let f_params = [];
-            let fn_statement = fn_statements.pop();
-            fn_statement.split(",").forEach((p) => {
-              if (p != "") {
-                f_params.push(this.processExpr(p, in_ctx, in_el, {bindScpe : C_NOBIND}));
+          exp = exp.replace(SubCpxRE, (x, substmt) => {
+            try {
+              substmt = substmt.trim();
+              if (substmt[0] == "'") {
+                return substmt;
               }
-            });
-            f_params.push(in_el);
-            // call within contexte
-            ref_obj = val;
-            val = val[fct_name].apply(val, f_params);
-          } else { 
-            this.logErr(in_el, "  ERR : property " + o + " does not point to a valid function.\n Expr: " + exp, in_ctx);
-            throw new Error();
-            return "";
+              return this.processExpr (substmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND});
+            } catch (e) {  }
+          })
+          this.dbg("Complex Fn is : " + exp);
+          let f = new Function("return " + exp);
+          return f.call(in_ctx.$app);
+      }
+
+      const RE = /^([$]+|[#@]{1}|[a-zA-Z_]+)([\.\[\(]{0,1}.*)/
+      let parts = exp.match(RE);
+      let next_part;
+      var cur_obj, root_obj;
+      if (!parts) { 
+          throw new Error("exp invalid :" + exp);
+      }
+      let root = parts[1];
+
+      let rest = parts[2].trim();
+      if ( root[0] == "$") { 
+          // Targetting context Data
+          // Looking through context data to find first matching.
+          cur_obj =  in_ctx.$data.find( cd => ( ["object", "function"].includes(typeof cd) ) );
+      }
+      else if ( root == "#") { 
+          // Targetting App Data
+          cur_obj = in_ctx.$app
+      }
+      else if ( root == "@") { 
+          // Targetting App Data
+          cur_obj = in_ctx.$instance_refs
+      }    
+      else if ( root == "CST"  && window.CST) { 
+          // Targetting CST
+          cur_obj = window.CST; 
+          in_lctx.bindScope = C_NOBIND; // Not bindable
+
+      }
+      else { 
+        // Find Best context
+        root_obj = in_ctx.$render; 
+        cur_obj = in_ctx.$render[root]
+        if (cur_obj === undefined) {
+          // in $data
+          let idx =  in_ctx.$data.findIndex( cd => ( ["object", "function"].includes(typeof cd) && cd[root] !== undefined ) );
+          if (idx >= 0) {
+            root_obj = in_ctx.$data[idx];
+            cur_obj = in_ctx.$data[idx][root];
           }
-        } else {
-          if (val[o] === undefined) {
-            this.logErr(in_el, "  ERR : property " + o + " not found.\n Expr: " + exp, in_ctx);
-            // Huge limitation here, since we can't distinguish null, from 0, from ""...
-            throw new Error();
-            return "";
-          }
-          
-          ref_obj = val;
-          val = val[o];
         }
+        if (cur_obj === undefined) {
+          //in $app
+          root_obj = in_ctx.$app; 
+          cur_obj = in_ctx.$app[root]
+        }
+        if (cur_obj === undefined) {
+          //in $app
+          root_obj = in_ctx.$instance_refs; 
+          cur_obj = in_ctx.$instance_refs[root]
+        }
+        if (cur_obj === undefined) {
+          this.logErr(in_el, "  ERR : Could determine any context.\n Expr: " + in_exp, in_ctx);
+        }
+
+        // cur_obj = in_ctx[root]; 
+      }
+
+      // Process rest.
+      let infos, eval_res, fn_params;
+      try {
+        while (1){
+            if ( rest === "") { break; cur_obj};
+            // console.debug("Analysing " + rest);
+            if ( ! isFn(cur_obj)){
+              // Cause functions must be called within context of host 
+              root_obj = cur_obj;
+            }          
+            switch( rest[0]) {
+                case '.' : 
+                    rest = rest.slice(1);
+                    parts = rest.match(RE);
+                    if (!parts) {
+                      this.logErr(in_el, "  ERR : Invalid part : '" +rest + "'.\n Expr: " + in_exp, in_ctx);
+                      throw new Error("Invalid part")
+                    };
+                    next_part = parts[1];
+                    rest = parts[2];
+                    cur_obj = cur_obj[next_part];
+                    break;
+                case '[' :
+                    // Must analyse what is inside. 
+                    infos = this.getEnclosed(rest);
+                    next_part = evaluate(obj, infos.enclosed);
+                    if ( ! next_part && next_part != 0) {
+                      this.logErr(in_el, "  ERR : SubPart not found for : '" +infos.enclosed + "'.\n Expr: " + in_exp, in_ctx);
+                      // throw new Error("SubPart not found for : '" +infos.enclosed + "' in '" + exp+"'");
+                      return ""
+                    }
+                    rest = rest.slice(infos.size);
+                    cur_obj = cur_obj[next_part];
+                    // root_obj = cur_obj;
+                    break;
+                case '(' : 
+                    infos = this.getEnclosed(rest);
+                    fn_params = [];
+                    infos.enclosed.split(",").forEach(stmt => {
+                        if (stmt.trim()) {
+                            fn_params.push(  this.processExpr (stmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND}));
+                        } else fn_params.push(undefined);
+                    })
+                    fn_params.push(in_el);
+                    rest = rest.slice(infos.size);
+                    cur_obj = cur_obj.apply(root_obj, fn_params);
+                    // root_obj = cur_obj;
+                    
+                    break;
+                default : 
+                    throw new Error("Not Handled");
+            } 
+          }
+      } catch (e) {
+        this.logErr(in_el, "  ERR : Could not evaluate  \n Expr: " + in_exp, in_ctx);
       }
       /* At this point, we may want to register binding... */
-      if (in_lctx.bindScope && in_lctx.bindScope != C_REFRESH && in_lctx.bindScope != C_NOBIND ){
+      if ( in_lctx.bindScope && in_lctx.bindScope != C_REFRESH && in_lctx.bindScope != C_NOBIND ){
         this.JBind({
+          el : in_el,
           ctx : in_ctx,
           fqdn : exp,
-          el : in_el,
-          obj : ref_obj,
-          prop: o,
+          obj : root_obj,
+          prop: next_part,
           bind_scope : in_lctx.bindScope
         });
-      }
-      return val;
-    }
-
-    //if complex expression  (example : ==> var1 + ' is related to ' + var2.prop  <==)
-    // Static strings must be encapsulated with  simple quote ' 
-    // does not support functions (not supported  : var1 + fct(var2) )
-    if (isComplexExpRE.test(exp)) {
-      this.dbg("Trying to analyse complex exp " + exp);
-      //get and evaluate each "word"
-      var processed_exp = exp;
-      let nb_sub = 0;
-      let string_statements = [];
-      processed_exp = processed_exp.replace(/\'(.*?)\'/g, function (x, y) {
-        string_statements.push(y);
-        return '§§§';
-      });
-
-      // ok, now we have simplified the complexe expression. should only remain variables
-      // let wordsRE = /(\${0,1}[a-zA-Z0-9_.\[\]\(\)]+)/g;
-      let wordsRE = isVarRE3_g;
-      let cpx_exp = processed_exp.replace(wordsRE,  (x, e) => {
-        // Trying to evaluate statements  within.
-        let res = this.processExpr( e, in_ctx, in_el);
-        if (typeof res == "string") res = '"' + res + '"';
-        if (typeof res == "object") {
-          this.warn(`A complex RE '${e}' in '${exp}' is making use of an object.\n Can be dangerous is an assignment is done... (ex a.b = 'toto', instead of a.b == 'toto').`);
-        };
-        return res;
-      });
-
-      // now restore string statements.
-      let i = 0;
-      cpx_exp = cpx_exp.replace(/§§§/g, function (x, y) {
-        return "'" + string_statements[i++] + "'";
-      })
-
-      // search ' = ' statements (not != nor == nor >= nor <=)
-      let t = cpx_exp;
-      while (t.length) {
-        let idx = t.indexOf("=");
-        if (idx == -1) { break;}
-        if ( [">","<","!","="].indexOf(t[idx-1]) == -1 && t[idx+1]!= '=' ) {
-          this.logErr(in_el, "  ERR : An affectation in a complex exp  has been found ("+cpx_exp+").\n Expr: " + exp, in_ctx);
-          throw new Error();
-        }
-        if (t[idx+1] == '=') idx++;
-        t = t.slice(idx+1);
-      }
-      let f = new Function("return " + cpx_exp);
-      this.dbg("Complex exp is : " + cpx_exp);
-      return f.call(in_ctx.$app);
-    }
-  } //end processExpr
+      }      
+      return cur_obj;
+  }
 
   // ------------------------------------------------------------------
   // Propagate a change to the form object
@@ -1119,6 +910,12 @@ var JNgine = new (function () {
         // on set of a new value, propagate change to all bound DOM Elements
         bindmap.targets.forEach( (map, i) => {
           try{
+            if (map.el.nodeName =="INPUT" && map.el.type=="radio") {
+              if (map.el.value == opt.obj[opt.prop]) {
+                  map.el.checked = true;
+              }
+              return
+            }
             // Bind on directive
             if ( map.bind_scope[0] == ':' ) {
                 // Can not work.... context is gone...
@@ -1149,37 +946,36 @@ var JNgine = new (function () {
       }
     });
     //Two way binding for INPUT and SELECT
-    if (['INPUT','SELECT'].indexOf(opt.el.tagName) >=0 ) {
-      opt.el.addEventListener('keyup', function (event) {
+    if (['INPUT','SELECT', 'TEXTAREA'].indexOf(opt.el.tagName) >=0 ) {
+      let fn = (e) => {
+        let el = e.currentTarget;
+        if (el.nodeName =='INPUT' && el.type == "radio") {
+          if (el.checked ) {
+            opt.obj[opt.prop] = el.value;
+          }
+          return;
+        }
         if (opt.obj[opt.prop] != opt.el.value){
           //console.log(" Input Changed to  :" + opt.el.value);
           opt.obj[opt.prop] = opt.el.value;
         }
-      });
-      opt.el.addEventListener('change', function (e) {
-        if (opt.obj[opt.prop] != opt.el.value){
-          //console.log(" Input Changed to  :" + opt.el.value);
-          opt.obj[opt.prop] = opt.el.value;
-        }
-      });     
+      }
+      opt.el.addEventListener('keyup', fn);
+      opt.el.addEventListener('change', fn);     
     }
+    
     return;
   }
 
-
-
   // ----------------------------------------------
   // Directives registries
+  // Directives are called through   :  :mydirective=""
   this.fn_map = {};
   this.fn = function( in_dir_name, in_exp, in_el, in_ctx, in_local) {
-    if (typeof this.fn_map[in_dir_name] == "function") {
+    if ( isFn(this.fn_map[in_dir_name]) ) {
       try {
         if (in_el.origDef === undefined) { in_el.origDef = {} } 
         in_el.origDef[":"+in_dir_name]= in_exp; // save orig def
-        // determine if bind requested :
-
-        // call it
-        //return this.fn_map[in_dir_name](in_el, in_exp, in_ctx, in_local);
         return this.fn_map[in_dir_name].call(this, in_el, in_exp, in_ctx, in_local);
       } catch (e) {
         this.logErr(in_el, " WAR(" + in_dir_name + ") : Failed to execute directive " + e + ".\n Expr: " + in_exp, in_ctx);
@@ -1216,10 +1012,11 @@ JNgine.fn_map.innerText = function (in_el, in_exp, in_ctx, in_lctx) {
 }
 
 //----------------------------------------------------
-JNgine.fn_map.if = function (in_el, exp, ctx) {
+JNgine.fn_map.if = function (in_el, exp, ctx, in_lctx) {
   try  {
     if (!this.processExpr(exp, ctx, in_el, { bindScope : C_NOBIND } )) {
       in_el.remove();
+      in_lctx["skipchilds"] = true;
       return false;
     }
     return true;
@@ -1285,17 +1082,6 @@ JNgine.fn_map.refm = function (in_el, in_exp, in_ctx) {
   }
   in_ctx.$refs[expr].push( (in_el) );
   in_ctx.$instance_refs[expr].push( (in_el) );
-  return true;
-}
-//----------------------------------------------------
-//rws-mapdomtovar  (but to a var  in $app.$refs)
-// deprecated
-JNgine.fn_map["ref-app"] = function (in_el, in_exp, in_ctx) {
-  console.warn("directive 'ref-app' deprecated");
-  if (in_ctx.$app.$refs === undefined) {
-    in_ctx.$app.$refs = {}
-  }
-  in_ctx.$app.$refs[in_exp] = in_el
   return true;
 }
 
@@ -1370,9 +1156,10 @@ JNgine.fn_map.repeat = function (in_el, in_exp, in_ctx, in_lctx) {
   return false;
 }
 //----------------------------------------------------
+// Loops an EL (and childNodes) over an array, or an object values. 
 // Usage :
-// :for="section in sections"
-// :for="section in getSections()"
+// :for="section in sections"   (idx available with  section_idx)
+// :for="line in lines"       (idx available with  line_idx)
 // :for="section in getSections() limit 10"
 JNgine.fn_map.for = function (in_el, exp, ctx, in_lctx) {
   var _this = JNgine;
@@ -1386,7 +1173,7 @@ JNgine.fn_map.for = function (in_el, exp, ctx, in_lctx) {
   if (z) {
     // Found a limitation statements. Save max iter value, and update expression.
     limit_iteration = z[2];
-    exp = z[1];
+    exp = z[1].trim();
   }
 
   const forExpRE = /^(\w+)\s+in\s+(.+)$/;
@@ -1396,9 +1183,6 @@ JNgine.fn_map.for = function (in_el, exp, ctx, in_lctx) {
     return false;
   }
 
-
-  // get list of val
-  // exemple ==> "e in elements"
   let sourceList = JNgine.processExpr(t[2], ctx, in_el, in_lctx);
   let iteration_datas = [];
   let sourceIsObject = false;
@@ -1410,7 +1194,7 @@ JNgine.fn_map.for = function (in_el, exp, ctx, in_lctx) {
       Object.keys(sourceList).forEach((key) => { iteration_datas.push(sourceList[key]);});
       sourceIsObject = true;
     } else {
-      this.logErr(in_el, " WAR(for) : source is neither an array nor an object " + sourceList + ". Setting to empty.\n Expr: " + exp, ctx)
+      this.logErr(in_el, " WAR(for) : source is neither an array nor an object " + sourceList + ". Setting to empty.\n Expr: " + exp, ctx);
     }
     //return;
   }
@@ -1463,15 +1247,16 @@ JNgine.fn_map.for = function (in_el, exp, ctx, in_lctx) {
 
   //finally, remove ref dom_el.
   in_el.remove();
-  //in_el.style.display="none";
 
-  // return false because nothing more to be done on that element.
+  // return false because nothing more to be done on the reference element.
   return false;
 }
 
 //----------------------------------------------------
-// handler directive allows management of an element outside of the Ngine.
-// child of that elements won't be processed !!!!
+// handler directive allows management of an element outside of  Ngine.
+// child of that elements won't be processed by NGine !!!!
+// If you to process AFTER the handling, use "handler-continue"
+// If you wan't to apply an handler AFTER Ngine Rendering, use "posthandler"
 // usage : :handler="myFunction"
 // usage : :handler="myFunction($.a, $.b)" // (myFunc will be called with in order ($.a, $.b, in_el, in_ctx)
 // usage : :handler="myFunction with $.a, $.b" // deprecated, same as myFunction($.a, $.b), but called with(in_el, $.a, $.b, in_ctx)
@@ -1484,17 +1269,18 @@ JNgine.fn_map.handler = function (in_el, in_exp, in_ctx,in_lctx) {
     let m = in_exp.match(withRE);
     if ( m ) {
       this.log(":handler: statements under the form of  myfunc with $.a, $.b are DEPRECATED");
-      hdl_func = JNgine.processExpr( m[1], in_ctx, in_el, { bindScope : C_NOBIND });;
+      hdl_func = this.processExpr( m[1], in_ctx, in_el, { bindScope : C_NOBIND });;
       m[2].split(",").forEach( m_exp => {
         params.push(this.processExpr(m_exp, in_ctx, in_el, { bindScope : C_NOBIND }));
       });
       
     } else {
       // Fix 2021-05-09
-      let tmp = this.processExpr(in_exp, in_ctx, in_el, { bindScope : C_NOBIND });
-      if (typeof tmp !== "function" &&  ! /.*\)\s$/.test(in_exp)) {
+      hdl_func = this.processExpr(in_exp, in_ctx, in_el, { bindScope : C_NOBIND });
+      if (typeof hdl_func !== "function" &&  ! /.*\)\s$/.test(in_exp)) {
+      this.logErr(in_el, " WAR(handler) : " + in_exp + " is not a callable function(2).\n Expr: " + in_exp, in_ctx);
         // End there.
-        return false;
+        // return false;
       }
 
     }
@@ -1665,6 +1451,7 @@ JNgine.fn_map.tab_init = function (in_el, in_exp, in_ctx, in_lctx) {
                 }   */},
     title_els: [],
     content_els: [],
+    current_active : null,
 
     // !!!!!   Do not use () =>  ! Use function() to preserve local this context
     navTo: function (in_tab_name, e) {  //  !!! USE FUNCTION() not ()=> !!!! 
@@ -1675,13 +1462,19 @@ JNgine.fn_map.tab_init = function (in_el, in_exp, in_ctx, in_lctx) {
         this.current_active = in_tab_name;
         return;
       }
+
       // Check existence of target tab
       if (! this.tab_panels[in_tab_name]) {
         console.warn("Tab Not found");
         return;
       }
 
-      // clear selection of them all
+      // If current active tab has an onleave callback
+      if (this.current_active && in_tab_name !== this.current_active && this.tab_panels[this.current_active].on_leave_fn) {
+        this.tab_panels[this.current_active].on_leave_fn.apply(in_ctx.$app,[]);
+      }
+
+// clear selection of them all
       this.title_els.forEach((e) => { e.classList.remove(this.style); });
       this.content_els.forEach((e) => { e.classList.add("tab_body_inactive"); });
 
@@ -1838,6 +1631,9 @@ JNgine.fn_map.ref_tab_name = function (in_el, in_exp, in_ctx, in_lctx) {
   // is it the default active?
   if ($tab.default_active != t_name && $tab.default_active != "__SHOW_ALL__") {
     in_el.classList.add("tab_body_inactive");
+  } else {
+    // If the tab has a trigger, execute it
+    $tab.navTo(t_name);
   }
 
   return true;
@@ -1853,7 +1649,29 @@ JNgine.fn_map.tab_nav_to = function (in_el, in_exp, in_ctx, in_lctx) {
   });
   return true;
 }
+//----------------------------------------------------------------------
+// handle new nav_tab
+JNgine.fn_map.tab_on_leave = function (in_el, in_exp, in_ctx, in_lctx) {
 
+  let $tab = in_ctx.$tabs[in_ctx.$cur_tab.name];
+  // Search current tab...
+  try {
+    let [target, config] = Object.entries($tab.tab_panels).find(([name, cfg]) => cfg.title_el === in_el)
+    if (! target ) {
+      this.logErr(in_el, " WAR(tab_on_leave) : Unable to determine targeted tab.\n Expr: " + in_exp, in_ctx)
+      throw new Error();
+    }
+    let on_leave_fn = this.processExpr(in_exp, in_ctx, in_el, in_lctx);
+    if ( typeof on_leave_fn  !== "function") {
+      this.warn(" WAR(tab_on_leave) : Target is unresolved or not a function.\n Expr: " + in_exp, in_ctx)
+    }
+    config.on_leave_fn = this.processExpr(in_exp, in_ctx, in_el, in_lctx);
+  }   catch(e) {
+    this.logErr(in_el, " WAR(tab_on_leave) : Unable to process.\n Expr: " + in_exp, in_ctx)
+  }
+
+  return true;
+}
 //----------------------------------------------------
 // set a Render context variable at rendering time 
 // that can be refered to when rendering.
