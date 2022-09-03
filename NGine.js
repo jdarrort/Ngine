@@ -652,7 +652,7 @@ var JNgine = new (function () {
     });
   }
   
-
+   
   //-----------------------------------------
   // $ ==> Refer to context data passed to Ngine
   // # ==> Refer to the caller data from the  calling object ()
@@ -661,172 +661,199 @@ var JNgine = new (function () {
   // Will not handle exp like    a.b[c+1]
   // Can handle exp like   'c + 1' ,  " 'MyName ' + getName() "
   this.processExpr = function (in_exp, in_ctx, in_el, in_lctx = { bindScope : C_NOBIND }) {
-      exp = in_exp.trim();
-      if (exp == "$") {return in_ctx.$data[0];}
-      if (exp =="api_path + '3'"){
-        console.log("WatchPoint");
-      }
+    let exp = in_exp.trim();
+    if (exp == "$") {return in_ctx.$data[0];}
+    if (exp =="api_path + '3'"){
+      console.log("WatchPoint");
+    }
 
-      // A Number ? 
-      if (/^[0-9]$/.test(exp)) { return exp; }
-      
-      // An encapsulated string ex :  'xxx'  ? 
-      const isStringRE = /^['|"](.*)["|']$/
-      if(isStringRE.test(exp)) { // ex "'toto'" ou "'  43434 " 
-          if ((exp.split('"').length + exp.split("'").length) == 4) {
-              return exp.match(isStringRE)[1];
-          }        
-      }
+    // A Number ? 
+    if (/^[0-9]$/.test(exp)) { return exp; }
+    
+    // An encapsulated string ex :  'xxx'  ? 
+    const isStringRE = /^['|"](.*)["|']$/
+    if(isStringRE.test(exp)) { // ex "'toto'" ou "'  43434 " 
+        if ((exp.split('"').length + exp.split("'").length) == 4) {
+            return exp.match(isStringRE)[1];
+        }        
+    }
 
-      const CpxRe = /[+\-*!=<>]/;
-      if (CpxRe.test(exp)) {
-          // throw new Error("Not Handled Yet");
-          // Will have to identify what is to be interpreted.
-          let SubCpxRE=/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/mg;
-          if (/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)=([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/.test(exp)) {
-            this.logErr(in_el, "  ERR : An affectation in a complex exp  has been found.\n Expr: " + exp, in_ctx);
-            throw new Error("Forbidden to assign  in statement '='");
-          }
-          exp = exp.replace(SubCpxRE, (x, substmt) => {
-            try {
-              substmt = substmt.trim();
-              if (substmt[0] == "'") {
-                return substmt;
-              }
-              return this.processExpr (substmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND});
-            } catch (e) {  }
-          })
-          this.dbg("Complex Fn is : " + exp);
-          let f = new Function("return " + exp);
-          return f.call(in_ctx.$app);
-      }
-
-      const RE = /^([$]+|[#@]{1}|[a-zA-Z_]+)([\.\[\(]{0,1}.*)/
-      let parts = exp.match(RE);
-      let next_part;
-      var cur_obj, root_obj;
-      if (!parts) { 
-          throw new Error("exp invalid :" + exp);
-      }
-      let root = parts[1];
-
-      let rest = parts[2].trim();
-      if ( root[0] == "$") { 
-          // Targetting context Data
-          // Looking through context data to find first matching.
-          cur_obj =  in_ctx.$data.find( cd => ( ["object", "function"].includes(typeof cd) ) );
-      }
-      else if ( root == "#") { 
-          // Targetting App Data
-          cur_obj = in_ctx.$app
-      }
-      else if ( root == "@") { 
-          // Targetting App Data
-          cur_obj = in_ctx.$instance_refs
-      }    
-      else if ( root == "CST"  && window.CST) { 
-          // Targetting CST
-          cur_obj = window.CST; 
-          in_lctx.bindScope = C_NOBIND; // Not bindable
-
-      }
-      else { 
-        // Find Best context
-        root_obj = in_ctx.$render; 
-        cur_obj = in_ctx.$render[root]
-        if (cur_obj === undefined) {
-          // in $data
-          let idx =  in_ctx.$data.findIndex( cd => ( ["object", "function"].includes(typeof cd) && cd[root] !== undefined ) );
-          if (idx >= 0) {
-            root_obj = in_ctx.$data[idx];
-            cur_obj = in_ctx.$data[idx][root];
-          }
+    const CpxRe = /[+\-*!=<>]/;
+    if (CpxRe.test(exp)) {
+      // we will handle each parts separately
+      let c, i = 0, sub_exp = "", sub_val, final_fn="";
+      while (i < exp.length) {
+        c = exp[i];
+        if (["+","-","*","!","=", "<", ">"].includes(c)) {
+          // when special char found, process current sub expression
+          sub_val = this.processExpr (sub_exp.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND});
+          // Transform as string   toto ==> 'toto'
+          if (typeof sub_val === "string" && sub_val[0] != "'") { sub_val = "'" + sub_val + "'"};
+          final_fn += sub_val + c;
+          sub_exp = "";
+        } else {
+          sub_exp += c;
         }
-        if (cur_obj === undefined) {
-          //in $app
-          root_obj = in_ctx.$app; 
-          cur_obj = in_ctx.$app[root]
-        }
-        if (cur_obj === undefined) {
-          //in $app
-          root_obj = in_ctx.$instance_refs; 
-          cur_obj = in_ctx.$instance_refs[root]
-        }
-        if (cur_obj === undefined) {
-          this.logErr(in_el, "  ERR : Could determine any context.\n Expr: " + in_exp, in_ctx);
-        }
+        i++;
+      }
+      // PRocess last statement
+      if (sub_exp.trim() != "") {
+        sub_val = this.processExpr (sub_exp.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND});
+        if (typeof sub_val === "string" && sub_val[0] != "'") { sub_val = "'" + sub_val + "'"};
+        final_fn += sub_val;
+      }
+      this.dbg("Complex Fn is : " + final_fn);
+      let f = new Function("return " + final_fn);
+      return f.call(in_ctx.$app);
 
-        // cur_obj = in_ctx[root]; 
+      /*
+      // Previous implem, 
+        // throw new Error("Not Handled Yet");
+        // Will have to identify what is to be interpreted.
+        let SubCpxRE=/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/mg;
+        if (/([ \d$#@a-zA-Z_'\.\[\]\(\)]+)=([ \d$#@a-zA-Z_'\.\[\]\(\)]+)/.test(exp)) {
+          this.logErr(in_el, "  ERR : An affectation in a complex exp  has been found.\n Expr: " + exp, in_ctx);
+          throw new Error("Forbidden to assign  in statement '='");
+        }
+        exp = exp.replace(SubCpxRE, (x, substmt) => {
+          try {
+            substmt = substmt.trim();
+            if (substmt[0] == "'") {
+              return substmt;
+            }
+            return this.processExpr (substmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND});
+          } catch (e) {  }
+        })
+        this.dbg("Complex Fn is : " + exp);
+        let f = new Function("return " + exp);
+        return f.call(in_ctx.$app);
+        */
+    }
+
+    const RE = /^([$]+|[#@]{1}|[a-zA-Z_]+)([\.\[\(]{0,1}.*)/
+    let parts = exp.match(RE);
+    let next_part;
+    var cur_obj, root_obj;
+    if (!parts) { 
+        throw new Error("exp invalid :" + exp);
+    }
+    let root = parts[1];
+    next_part = root;
+
+    let rest = parts[2].trim();
+    if ( root[0] == "$") { 
+        // Targetting context Data
+        // Looking through context data to find first matching.
+        cur_obj =  in_ctx.$data.find( cd => ( ["object", "function"].includes(typeof cd) ) );
+    }
+    else if ( root == "#") { 
+        // Targetting App Data
+        cur_obj = in_ctx.$app
+    }
+    else if ( root == "@") { 
+        // Targetting App Data
+        cur_obj = in_ctx.$instance_refs
+    }    
+    else if ( root == "CST"  && window.CST) { 
+        // Targetting CST
+        cur_obj = window.CST; 
+        in_lctx.bindScope = C_NOBIND; // Not bindable
+
+    }
+    else { 
+      // Find Best context
+      root_obj = in_ctx.$render; 
+      cur_obj = in_ctx.$render[root]
+      if (cur_obj === undefined) {
+        // in $data
+        let idx =  in_ctx.$data.findIndex( cd => ( ["object", "function"].includes(typeof cd) && cd[root] !== undefined ) );
+        if (idx >= 0) {
+          root_obj = in_ctx.$data[idx];
+          cur_obj = in_ctx.$data[idx][root];
+        }
+      }
+      if (cur_obj === undefined) {
+        //in $app
+        root_obj = in_ctx.$app; 
+        cur_obj = in_ctx.$app[root]
+      }
+      if (cur_obj === undefined) {
+        //in $app
+        root_obj = in_ctx.$instance_refs; 
+        cur_obj = in_ctx.$instance_refs[root]
+      }
+      if (cur_obj === undefined) {
+        this.logErr(in_el, "  ERR : Could not determine any context.\n Expr: " + in_exp, in_ctx);
       }
 
-      // Process rest.
-      let infos, eval_res, fn_params;
-      try {
-        while (1){
-            if ( rest === "") { break; cur_obj};
-            // console.debug("Analysing " + rest);
-            if ( ! isFn(cur_obj)){
-              // Cause functions must be called within context of host 
-              root_obj = cur_obj;
-            }          
-            switch( rest[0]) {
-                case '.' : 
-                    rest = rest.slice(1);
-                    parts = rest.match(RE);
-                    if (!parts) {
-                      this.logErr(in_el, "  ERR : Invalid part : '" +rest + "'.\n Expr: " + in_exp, in_ctx);
-                      throw new Error("Invalid part")
-                    };
-                    next_part = parts[1];
-                    rest = parts[2];
-                    cur_obj = cur_obj[next_part];
-                    break;
-                case '[' :
-                    // Must analyse what is inside. 
-                    infos = this.getEnclosed(rest);
-                    next_part = evaluate(obj, infos.enclosed);
-                    if ( ! next_part && next_part != 0) {
-                      this.logErr(in_el, "  ERR : SubPart not found for : '" +infos.enclosed + "'.\n Expr: " + in_exp, in_ctx);
-                      // throw new Error("SubPart not found for : '" +infos.enclosed + "' in '" + exp+"'");
-                      return ""
-                    }
-                    rest = rest.slice(infos.size);
-                    cur_obj = cur_obj[next_part];
-                    // root_obj = cur_obj;
-                    break;
-                case '(' : 
-                    infos = this.getEnclosed(rest);
-                    fn_params = [];
-                    infos.enclosed.split(",").forEach(stmt => {
-                        if (stmt.trim()) {
-                            fn_params.push(  this.processExpr (stmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND}));
-                        } else fn_params.push(undefined);
-                    })
-                    fn_params.push(in_el);
-                    rest = rest.slice(infos.size);
-                    cur_obj = cur_obj.apply(root_obj, fn_params);
-                    // root_obj = cur_obj;
-                    
-                    break;
-                default : 
-                    throw new Error("Not Handled");
-            } 
-          }
-      } catch (e) {
-        this.logErr(in_el, "  ERR : Could not evaluate  \n Expr: " + in_exp, in_ctx);
-      }
-      /* At this point, we may want to register binding... */
-      if ( in_lctx.bindScope && in_lctx.bindScope != C_REFRESH && in_lctx.bindScope != C_NOBIND ){
-        this.JBind({
-          el : in_el,
-          ctx : in_ctx,
-          fqdn : exp,
-          obj : root_obj,
-          prop: next_part,
-          bind_scope : in_lctx.bindScope
-        });
-      }      
-      return cur_obj;
+      // cur_obj = in_ctx[root]; 
+    }
+
+    // Process rest.
+    let infos, eval_res, fn_params;
+    try {
+      while (1){
+          if ( rest === "") { break; };
+          // console.debug("Analysing " + rest);
+          if (typeof cur_obj !== "function"){
+            // Cause functions must be called within context of host 
+            root_obj = cur_obj;
+          }          
+          next_part = null;
+          switch( rest[0]) {
+              case '.' : 
+                  rest = rest.slice(1);
+                  parts = rest.match(RE);
+                  if (!parts) {
+                    this.logErr(in_el, "  ERR : Invalid part : '" +rest + "'.\n Expr: " + in_exp, in_ctx);
+                    throw new Error("Invalid part")
+                  };
+                  next_part = parts[1];
+                  rest = parts[2];
+                  cur_obj = cur_obj[next_part];
+                  break;
+              case '[' :
+                  // Must analyse what is inside. 
+                  infos = this.getEnclosed(rest);
+                  next_part = this.processExpr (infos.enclosed, in_ctx,  in_el , {bindScpe : C_NOBIND});
+                  if ( ! next_part && next_part != 0) {
+                    this.logErr(in_el, "  ERR : SubPart not found for : '" +infos.enclosed + "'.\n Expr: " + in_exp, in_ctx);
+                    return "";
+                  }
+                  rest = rest.slice(infos.size);
+                  cur_obj = cur_obj[next_part];
+                  break;
+              case '(' : 
+                  infos = this.getEnclosed(rest);
+                  fn_params = [];
+                  infos.enclosed.split(",").forEach(stmt => {
+                      if (stmt.trim()) {
+                          fn_params.push(  this.processExpr (stmt.trim(), in_ctx,  in_el , {bindScpe : C_NOBIND}));
+                      } else fn_params.push(undefined);
+                  })
+                  fn_params.push(in_el);
+                  rest = rest.slice(infos.size);
+                  cur_obj = cur_obj.apply(root_obj, fn_params);
+                  break;
+              default : 
+                  throw new Error("Not Handled");
+          } 
+        }
+    } catch (e) {
+      this.logErr(in_el, "  ERR : Could not evaluate  \n Expr: " + in_exp, in_ctx);
+    }
+    /* At this point, we may want to register binding... */
+    if ( in_lctx.bindScope && in_lctx.bindScope != C_REFRESH && in_lctx.bindScope != C_NOBIND ){
+      this.JBind({
+        el : in_el,
+        ctx : in_ctx,
+        fqdn : exp,
+        obj : root_obj,
+        prop: next_part,
+        bind_scope : in_lctx.bindScope
+      });
+    }      
+    return cur_obj;
   }
 
   // ------------------------------------------------------------------
